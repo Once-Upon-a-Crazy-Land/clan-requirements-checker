@@ -44,7 +44,7 @@ function enqueueScan(message, force = false) {
     const existing = donationLedger.data.proofs[message.id];
     if (!force && existing && existing.signature === attachmentSignature(message)) return existing;
     const proof = await scanProof(message, donationLedger);
-    await updateProofNotice(message, proof);
+    await removePublicProofNotice(message.channel, proof);
     return proof;
   });
   scanQueue = job.catch(() => {});
@@ -52,15 +52,28 @@ function enqueueScan(message, force = false) {
   job.finally(() => scanJobs.delete(message.id)).catch(() => {});
   return job;
 }
-async function updateProofNotice(message, proof) {
-  if (proof.noticeId) {
-    const notice = await message.channel.messages.fetch(proof.noticeId);
-    if (notice.author.id !== client.user.id) throw new Error('Invalid donation notice.');
-    await notice.edit(proofView(proof));
-  } else {
-    const notice = await message.reply({ ...proofView(proof), allowedMentions: { parse: [], repliedUser: false } });
-    proof.noticeId = notice.id;
-    store.save();
+async function removePublicProofNotice(channel, proof) {
+  if (!proof.noticeId) return;
+  try {
+    const notice = await channel.messages.fetch(proof.noticeId);
+    if (notice.author.id !== client.user.id) return;
+    await notice.delete();
+  } catch (error) {
+    if (error.code !== 10008) {
+      console.error('Could not remove old public donation scan:', error.message);
+      return;
+    }
+  }
+  delete proof.noticeId;
+  store.save();
+}
+async function cleanPublicProofNotices() {
+  for (const proof of Object.values(donationLedger.data.proofs)) {
+    if (!proof.noticeId) continue;
+    try {
+      const channel = await configuredGuild.channels.fetch(proof.channelId);
+      await removePublicProofNotice(channel, proof);
+    } catch (error) { console.error('Old donation scan cleanup:', error.message); }
   }
 }
 let timer;
@@ -228,6 +241,7 @@ client.once(Events.ClientReady, async () => {
     console.log('Ready: clan commands in ' + timezone + '. Donation automation ' + (automation ? 'active.' : 'needs setup.'));
     timer = setInterval(schedule, 60000);
     schedule();
+    void cleanPublicProofNotices().catch(error => console.error('Donation notice cleanup:', error.message));
   } catch (error) {
     console.error('Startup failed:', error.message);
     client.destroy();
@@ -261,10 +275,8 @@ client.on(Events.MessageCreate, async message => {
     schedule();
     await message.react(CHECK_EMOJI_ID);
     if (visionEnabled()) {
-      void enqueueScan(message).catch(async error => {
+      void enqueueScan(message).catch(error => {
         console.error('Donation scan:', error.message);
-        try { await message.reply({ ...brandedMessage('Crazyland clan donation scan.', 'Scan failed. No donation was credited. A leader can use /donation action:Scan proof to retry.'), allowedMentions: { parse: [], repliedUser: false } }); }
-        catch (replyError) { console.error('Scan notice:', replyError.message); }
       });
     }
   } catch (error) { console.error('Screenshot acknowledgement:', error.message); }
@@ -284,13 +296,11 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
       const currentMember = await configuredGuild.members.fetch({ user: user.id, force: true });
       const currentMessage = await message.channel.messages.fetch({ message: message.id, force: true });
       const proof = donationLedger.approve(message.id, currentMember, settings(), attachmentSignature(currentMessage));
-      await updateProofNotice(currentMessage, proof);
+      await removePublicProofNotice(currentMessage.channel, proof);
       await currentMessage.react('✅');
     });
   } catch (error) {
     console.error('Donation verification:', error.message);
-    try { await reaction.message.reply({ ...brandedMessage('Crazyland clan donation verification.', String(error.message).slice(0, 1700)), allowedMentions: { parse: [], repliedUser: false } }); }
-    catch (replyError) { console.error('Verification notice:', replyError.message); }
   }
 });
 
@@ -335,13 +345,13 @@ client.on(Events.InteractionCreate, async interaction => {
           const current = await channel.messages.fetch({ message: id, force: true });
           const proof = await serialize(() => donationLedger.approve(id, member, settings(), attachmentSignature(current),
             interaction.options.getBoolean('repeat-confirmed') === true));
-          await updateProofNotice(current, proof);
+          await removePublicProofNotice(current.channel, proof);
           await current.react('✅');
           await interaction.editReply(proofView(proof));
         } else {
           const member = await configuredGuild.members.fetch({ user: interaction.user.id, force: true });
           const proof = await serialize(() => donationLedger.void(id, member, settings()));
-          await updateProofNotice(message, proof);
+          await removePublicProofNotice(message.channel, proof);
           const verified = message.reactions.cache.find(r => r.emoji.name === '✅');
           if (verified?.me) await verified.users.remove(client.user.id);
           await interaction.editReply(proofView(proof));
