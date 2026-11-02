@@ -69,10 +69,15 @@ async function removePublicProofNotice(channel, proof) {
 }
 async function cleanPublicProofNotices() {
   for (const proof of Object.values(donationLedger.data.proofs)) {
-    if (!proof.noticeId) continue;
+    if (!proof.noticeId && !['approved', 'void'].includes(proof.status)) continue;
     try {
       const channel = await configuredGuild.channels.fetch(proof.channelId);
       await removePublicProofNotice(channel, proof);
+      if (['approved', 'void'].includes(proof.status)) {
+        const message = await channel.messages.fetch(proof.id);
+        const greenCheck = message.reactions.cache.find(r => r.emoji.name === '✅');
+        if (greenCheck?.me) await greenCheck.users.remove(client.user.id);
+      }
     } catch (error) { console.error('Old donation scan cleanup:', error.message); }
   }
 }
@@ -297,7 +302,6 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
       const currentMessage = await message.channel.messages.fetch({ message: message.id, force: true });
       const proof = donationLedger.approve(message.id, currentMember, settings(), attachmentSignature(currentMessage));
       await removePublicProofNotice(currentMessage.channel, proof);
-      await currentMessage.react('✅');
     });
   } catch (error) {
     console.error('Donation verification:', error.message);
@@ -346,7 +350,6 @@ client.on(Events.InteractionCreate, async interaction => {
           const proof = await serialize(() => donationLedger.approve(id, member, settings(), attachmentSignature(current),
             interaction.options.getBoolean('repeat-confirmed') === true));
           await removePublicProofNotice(current.channel, proof);
-          await current.react('✅');
           await interaction.editReply(proofView(proof));
         } else {
           const member = await configuredGuild.members.fetch({ user: interaction.user.id, force: true });
