@@ -38,6 +38,16 @@ Identical image files are rejected if already credited. Matching donor/amount/ti
 
 Implementation references: [OpenAI image inputs](https://developers.openai.com/api/docs/guides/images-vision), [structured outputs](https://developers.openai.com/api/docs/guides/structured-outputs), and [Discord gateway intents](https://docs.discord.com/developers/events/gateway).
 
+## Monthly donation leaderboard
+
+In **/clan → action: Setup**, choose **Monthly donation leaderboard channel**, select a text channel, and press **Save setup**. Clear that channel selector to disable monthly posts. The bot validates read/history, send, embed and attachment permissions before saving.
+
+Once enabled, the bot begins tracking the current calendar month. Shortly after midnight on the first of the next month, in the bot timezone, it posts one public leaderboard for the month just ended. It shows the top 25 donors ranked by verified Gems, the total Gems across all donors, and donor count, without pinging anyone. For example, enabling in November produces November's leaderboard on December 1. No older months are posted on first setup. Empty months receive a no-verified-donations report.
+
+Only approved screenshot credits count; pending, unreadable and voided proofs are excluded. Months use the original Discord screenshot submission date, including older screenshots scanned later, rather than approval time. Reports are snapshots when prepared for posting: later approvals, voids and name-link changes do not revise an already prepared or posted report. All-time member totals remain separate.
+
+The bot checks each minute and recovers missed month-end posts after downtime, one month per check. Progress and prepared reports are saved in the persistent state file. Before retrying a send, it checks bot message history to recover an interrupted post without duplicating it; inaccessible or excessive history blocks the retry safely. Keep the state volume persistent and one bot replica running. If Setup changes during an interrupted post, that prepared post finishes in its original channel; following months use the new channel. Clearing the selector pauses posting and catch-up until it is configured again.
+
 ## Donation breaks
 
 Use **/clan → action: Donation breaks** as a server administrator, then **Create break**. Enter a name (for example, Halloween break), inclusive start and end dates, and an optional announcement. Dates use the bot timezone; ISO dates such as `2026-10-30` or short dates such as `30 Oct` work. Breaks can last up to 365 days. Non-overlapping future breaks can be scheduled.

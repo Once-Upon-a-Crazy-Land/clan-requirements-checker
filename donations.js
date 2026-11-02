@@ -184,6 +184,7 @@ export async function scanProof(message, ledger, { scanner = scanImage, fetcher 
   const attachments = images(message);
   if (!attachments.length || attachments.length > 5) throw new Error('Use 1–5 image attachments per proof.');
   const proof = { id: message.id, channelId: message.channelId, authorId: message.author.id,
+    submittedAt: message.createdTimestamp,
     signature: attachmentSignature(message), hashes: [], rows: [], status: 'pending', createdAt: new Date().toISOString(),
     ...(existing?.noticeId ? { noticeId: existing.noticeId } : {}) };
   for (const attachment of attachments) {

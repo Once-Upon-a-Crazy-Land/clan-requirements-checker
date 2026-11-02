@@ -125,6 +125,27 @@ test('validation resolves all selected channels and roles and rejects inaccessib
   await assert.rejects(validateSettings(guildFixture(), { ...chosen(), leaderRoleIds: [] }), /1–10/);
 });
 
+test('monthly leaderboard channel is optional, selectable, clearable and permission checked', async () => {
+  assert.equal(defaultSettings().leaderboardChannelId, null);
+  const sessions = new SetupSessions();
+  const session = sessions.open('admin', 'guild', {});
+  sessions.selectField(session, 'leaderboardChannelId');
+  sessions.selectValues(session, [ids.channel]);
+  assert.equal(session.draft.leaderboardChannelId, ids.channel);
+  const view = setupView(session);
+  assert.equal(view.components[1].toJSON().components[0].min_values, 0);
+  const channels = await validateSettings(guildFixture(), session.draft);
+  assert.equal(channels.leaderboardChannelId.id, ids.channel);
+  sessions.selectValues(session, []);
+  assert.equal(session.draft.leaderboardChannelId, null);
+  assert.equal((await validateSettings(guildFixture(), session.draft)).leaderboardChannelId, null);
+  const denied = guildFixture();
+  const fetch = denied.channels.fetch;
+  denied.channels.fetch = async id => id === ids.channel ? { id, guildId: 'guild', type: ChannelType.GuildText,
+    permissionsFor: () => new PermissionsBitField(PermissionFlagsBits.ViewChannel) } : fetch(id);
+  await assert.rejects(validateSettings(denied, { ...defaultSettings(), leaderboardChannelId: ids.channel }), /leaderboard channel: bot needs ReadMessageHistory/);
+});
+
 test('configured roster is used by the donation automation report', async () => {
   const tracked = member('tracked', ids.member);
   const automation = new Automation({ guild: { members: { list: async () => new Map([[tracked.id, tracked]]) } },

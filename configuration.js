@@ -4,7 +4,7 @@ import { donationBreaks } from './break-state.js';
 export function defaultSettings() {
   const donation = process.env.DONATION_CHANNEL_ID || '1535655837828382740';
   return {
-    donationChannelId: donation, reminderChannelId: donation,
+    donationChannelId: donation, reminderChannelId: donation, leaderboardChannelId: null,
     vacationChannelId: '1549128315095355422', adminChannelId: '1537173435611090944',
     memberRoleId: '1532826238572298451', formerMemberRoleId: null, visitorRoleId: null,
     leaderRoleIds: ['1532826140086112256', '1532826772624769316'],
@@ -26,6 +26,7 @@ export const SETTINGS_FIELDS = {
   vacationChannelId: { label: 'Vacation notice channel', kind: 'channel' },
   donationChannelId: { label: 'Donation proof channel', kind: 'channel' },
   reminderChannelId: { label: 'Donation reminder channel', kind: 'channel' },
+  leaderboardChannelId: { label: 'Monthly donation leaderboard channel', kind: 'channel', min: 0 },
   adminChannelId: { label: 'Time-off review channel', kind: 'channel' },
   memberRoleId: { label: 'Tracked member role', kind: 'role' },
   formerMemberRoleId: { label: 'No longer a member role', kind: 'role', min: 0 },
@@ -63,6 +64,7 @@ export async function validateSettings(guild, settings) {
   const channels = {};
   for (const [key, field] of Object.entries(SETTINGS_FIELDS)) {
     if (field.kind !== 'channel') continue;
+    if (settings[key] == null && field.min === 0) { channels[key] = null; continue; }
     const channel = await guild.channels.fetch(settings[key]);
     if (!channel || channel.guildId !== guild.id || channel.type !== ChannelType.GuildText) {
       throw new Error(`${field.label} must be a text channel in this server.`);

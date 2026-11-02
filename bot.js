@@ -18,6 +18,7 @@ import { DonationBreakManager } from './donation-breaks.js';
 import { assignMemberRoles, reconcileMembershipRoles } from './member-roles.js';
 import { updatePatientPresence } from './presence.js';
 import { breakModal, breaksView, BREAK_MODAL } from './break-panel.js';
+import { MonthlyLeaderboard } from './donation-leaderboard.js';
 
 const { DISCORD_TOKEN, GUILD_ID } = process.env;
 const timezone = process.env.TIMEZONE || 'Europe/Paris';
@@ -85,6 +86,7 @@ let timer;
 let adminChannel;
 let configuredGuild;
 let breakManager;
+let monthlyLeaderboard;
 let configurationError = null;
 const setupSessions = new SetupSessions();
 const settings = () => getSettings(store?.data);
@@ -102,6 +104,7 @@ const schedule = () => {
     const errors = [];
     try { await breakManager?.sync(); } catch (error) { errors.push(error.message); }
     try { if (automation) await automation.tick(); } catch (error) { errors.push(error.message); }
+    try { await monthlyLeaderboard?.tick(); } catch (error) { errors.push('Monthly leaderboard: ' + error.message); }
     if (errors.length) { const message = errors.join('; '); if (automation) automation.lastError = message; throw new Error(message); }
   }).catch(error => console.error('Daily check failed:', error.message))
     .finally(() => { tickQueued = false; });
@@ -238,6 +241,7 @@ client.once(Events.ClientReady, async () => {
     configuredGuild = await client.guilds.fetch(GUILD_ID);
     store = new Store(fileURLToPath(new URL('./data/state.json', import.meta.url)), today(), GUILD_ID, timezone);
     donationLedger = new DonationLedger(store);
+    monthlyLeaderboard = new MonthlyLeaderboard({ guild: configuredGuild, store, timezone, botId: client.user.id });
     breakManager = new DonationBreakManager({ guild: configuredGuild, store, botId: client.user.id, timezone });
     // Keep Setup available even if a configured channel or role was deleted.
     await registerCommands(configuredGuild);
