@@ -5,6 +5,12 @@ import { defaultSettings } from './configuration.js';
 export function checkAccess(interaction, guildId, settings = defaultSettings()) {
   if (interaction.guildId !== guildId) throw new Error('This is not the configured server.');
   const action = commandAction(interaction);
+  if (['donation-link', 'donation-scan', 'donation-void', 'donation-verify'].includes(action)) {
+    const roles = interaction.member?.roles;
+    const hasRole = id => Array.isArray(roles) ? roles.includes(id) : roles?.cache?.has(id);
+    if (!settings.leaderRoleIds.some(hasRole)) throw new Error('Only configured Leaders or Co-leaders can manage donation proofs and name links.');
+    return;
+  }
   const approval = interaction.customId?.startsWith('timeoff-review:approve:')
     || interaction.customId === 'admin:approve'
     || interaction.customId === 'admin-submit:approve';

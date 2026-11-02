@@ -1,4 +1,5 @@
-import { Client, GatewayIntentBits, Events, MessageFlags } from 'discord.js';
+import { Client, GatewayIntentBits, Events, MessageFlags, Partials, escapeMarkdown } from 'discord.js';
+import { DonationLedger, CHECK_EMOJI_ID, attachmentSignature, canVerifyDonation, scanProof, proofView } from './donations.js';
 import { fileURLToPath } from 'node:url';
 import { dayAt, validDay, hasImage, latestScreenshot } from './tracking.js';
 import { canRequestTimeoff, Store, dateRange } from './state.js';
@@ -19,7 +20,6 @@ import { updatePatientPresence } from './presence.js';
 import { breakModal, breaksView, BREAK_MODAL } from './break-panel.js';
 
 const { DISCORD_TOKEN, GUILD_ID } = process.env;
-const CHECK_EMOJI_ID = '1535935138142224435';
 const timezone = process.env.TIMEZONE || 'Europe/Paris';
 for (const [name, value] of Object.entries({ GUILD_ID })) {
   if (!/^\d{17,20}$/.test(value || '')) throw new Error(`Set a valid ${name} in .env`);
@@ -29,11 +29,40 @@ const today = () => dayAt(Date.now(), timezone);
 today();
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers,
-    GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
+    GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.GuildMessageReactions],
+  partials: [Partials.Message, Partials.Channel, Partials.Reaction, Partials.User],
   allowedMentions: { parse: [] },
 });
 let automation;
 let store;
+let donationLedger;
+let scanQueue = Promise.resolve();
+const scanJobs = new Map();
+function enqueueScan(message, force = false) {
+  if (scanJobs.has(message.id)) return scanJobs.get(message.id);
+  const job = scanQueue.then(async () => {
+    const existing = donationLedger.data.proofs[message.id];
+    if (!force && existing && existing.signature === attachmentSignature(message)) return existing;
+    const proof = await scanProof(message, donationLedger);
+    await updateProofNotice(message, proof);
+    return proof;
+  });
+  scanQueue = job.catch(() => {});
+  scanJobs.set(message.id, job);
+  job.finally(() => scanJobs.delete(message.id)).catch(() => {});
+  return job;
+}
+async function updateProofNotice(message, proof) {
+  if (proof.noticeId) {
+    const notice = await message.channel.messages.fetch(proof.noticeId);
+    if (notice.author.id !== client.user.id) throw new Error('Invalid donation notice.');
+    await notice.edit(proofView(proof));
+  } else {
+    const notice = await message.reply({ ...proofView(proof), allowedMentions: { parse: [], repliedUser: false } });
+    proof.noticeId = notice.id;
+    store.save();
+  }
+}
 let timer;
 let adminChannel;
 let configuredGuild;
@@ -190,6 +219,7 @@ client.once(Events.ClientReady, async () => {
   try {
     configuredGuild = await client.guilds.fetch(GUILD_ID);
     store = new Store(fileURLToPath(new URL('./data/state.json', import.meta.url)), today(), GUILD_ID, timezone);
+    donationLedger = new DonationLedger(store);
     breakManager = new DonationBreakManager({ guild: configuredGuild, store, botId: client.user.id, timezone });
     // Keep Setup available even if a configured channel or role was deleted.
     await registerCommands(configuredGuild);
@@ -225,10 +255,43 @@ client.on(Events.MessageCreate, async message => {
   if (!automation || message.guildId !== GUILD_ID || message.channelId !== settings().donationChannelId
       || message.author.bot || message.webhookId || !hasImage(message)) return;
   try {
-    await patient(message.author.id);
+    const author = await configuredGuild.members.fetch(message.author.id);
+    if (isFormerMember(author, settings()) || !(author.roles.cache.has(settings().memberRoleId)
+        || canVerifyDonation(author, settings()))) return;
     schedule();
     await message.react(CHECK_EMOJI_ID);
+    if (process.env.OPENAI_API_KEY) {
+      void enqueueScan(message).catch(async error => {
+        console.error('Donation scan:', error.message);
+        try { await message.reply({ ...brandedMessage('Crazyland clan donation scan.', 'Scan failed. No donation was credited. A leader can use /clan action:Scan proof to retry.'), allowedMentions: { parse: [], repliedUser: false } }); }
+        catch (replyError) { console.error('Scan notice:', replyError.message); }
+      });
+    }
   } catch (error) { console.error('Screenshot acknowledgement:', error.message); }
+});
+
+client.on(Events.MessageReactionAdd, async (reaction, user) => {
+  if (!donationLedger || user.bot || reaction.emoji.id !== CHECK_EMOJI_ID
+      || reaction.message.guildId !== GUILD_ID || reaction.message.channelId !== settings().donationChannelId) return;
+  try {
+    const member = await configuredGuild.members.fetch({ user: user.id, force: true });
+    if (!canVerifyDonation(member, settings())) return;
+    // Fetch the actual current attachments, including for messages outside the cache after restart.
+    const message = await reaction.message.channel.messages.fetch({ message: reaction.message.id, force: true });
+    if (message.author.bot || message.webhookId || !hasImage(message)) return;
+    if (scanJobs.has(message.id)) await scanJobs.get(message.id);
+    await serialize(async () => {
+      const currentMember = await configuredGuild.members.fetch({ user: user.id, force: true });
+      const currentMessage = await message.channel.messages.fetch({ message: message.id, force: true });
+      const proof = donationLedger.approve(message.id, currentMember, settings(), attachmentSignature(currentMessage));
+      await updateProofNotice(currentMessage, proof);
+      await currentMessage.react('✅');
+    });
+  } catch (error) {
+    console.error('Donation verification:', error.message);
+    try { await reaction.message.reply({ ...brandedMessage('Crazyland clan donation verification.', String(error.message).slice(0, 1700)), allowedMentions: { parse: [], repliedUser: false } }); }
+    catch (replyError) { console.error('Verification notice:', replyError.message); }
+  }
 });
 
 client.on(Events.InteractionCreate, async interaction => {
@@ -244,6 +307,48 @@ client.on(Events.InteractionCreate, async interaction => {
     if (!store || interaction.guildId !== GUILD_ID) throw new Error('Bot is starting or this is not the configured server.');
     checkAccess(interaction, GUILD_ID, settings());
     const action = commandAction(interaction);
+    if (isCommand && action?.startsWith('donation-') && action !== 'donation-admin') {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      if (action === 'donation-link') {
+        const user = interaction.options.getUser('member');
+        const name = interaction.options.getString('game-name');
+        if (!user || user.bot || !name) throw new Error('Choose a human member and enter game-name.');
+        await configuredGuild.members.fetch(user.id);
+        await serialize(() => { checkAccess(interaction, GUILD_ID, settings()); donationLedger.link(user.id, name); });
+        await interaction.editReply(brandedMessage('Crazyland clan name linked.', `<@${user.id}> is linked to **${escapeMarkdown(name)}**. Existing credited donations stay with their original Discord member.`));
+      } else if (action === 'donation-total') {
+        const user = interaction.options.getUser('member') || interaction.user;
+        await interaction.editReply(brandedMessage('Crazyland clan donation total.', `<@${user.id}>: **${donationLedger.total(user.id).toLocaleString('en-US')} Gems** verified.`));
+      } else {
+        const id = interaction.options.getString('proof-id');
+        if (!/^\d{17,20}$/.test(id || '')) throw new Error('Enter the original screenshot message ID in proof-id.');
+        const channel = await configuredGuild.channels.fetch(settings().donationChannelId);
+        const message = await channel.messages.fetch({ message: id, force: true });
+        if (message.author.bot || message.webhookId || !hasImage(message)) throw new Error('Choose a member screenshot in the donation proof channel.');
+        if (action === 'donation-scan') {
+          const proof = await enqueueScan(message, true);
+          await message.react(CHECK_EMOJI_ID);
+          await interaction.editReply(proofView(proof));
+        } else if (action === 'donation-verify') {
+          if (scanJobs.has(id)) await scanJobs.get(id);
+          const member = await configuredGuild.members.fetch({ user: interaction.user.id, force: true });
+          const current = await channel.messages.fetch({ message: id, force: true });
+          const proof = await serialize(() => donationLedger.approve(id, member, settings(), attachmentSignature(current),
+            interaction.options.getBoolean('repeat-confirmed') === true));
+          await updateProofNotice(current, proof);
+          await current.react('✅');
+          await interaction.editReply(proofView(proof));
+        } else {
+          const member = await configuredGuild.members.fetch({ user: interaction.user.id, force: true });
+          const proof = await serialize(() => donationLedger.void(id, member, settings()));
+          await updateProofNotice(message, proof);
+          const verified = message.reactions.cache.find(r => r.emoji.name === '✅');
+          if (verified?.me) await verified.users.remove(client.user.id);
+          await interaction.editReply(proofView(proof));
+        }
+      }
+      return;
+    }
     if (isBreakButton && interaction.customId === 'breaks:create') {
       await interaction.showModal(breakModal(today()));
       return;

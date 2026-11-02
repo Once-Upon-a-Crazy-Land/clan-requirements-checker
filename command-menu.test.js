@@ -9,14 +9,14 @@ const interaction = action => ({ guildId: 'server', commandName: 'clan', options
   getString: (name, required) => { assert.equal(name, 'action'); assert.equal(required, true); return action; },
 } });
 
-test('one clan command exposes six action choices and an optional report date', () => {
+test('one clan command exposes clan and donation actions and an optional report date', () => {
   assert.equal(commands.length, 1);
   const command = commands[0].toJSON();
   assert.equal(command.name, 'clan');
   assert.equal(command.default_member_permissions, undefined);
   assert.equal(command.options[0].name, 'action');
   assert.equal(command.options[0].required, true);
-  assert.deepEqual(command.options[0].choices.map(c => c.name), ['Donation report', 'Request time off', 'My time off', 'Admin panel', 'Setup', 'Donation breaks']);
+  assert.deepEqual(command.options[0].choices.map(c => c.name), ['Donation report', 'Request time off', 'My time off', 'Admin panel', 'Setup', 'Donation breaks', 'Link member', 'Donation total', 'Scan proof', 'Void donation proof', 'Verify proof']);
   assert.equal(command.options[1].name, 'date');
   assert.ok(!command.options[1].required);
   for (const choice of command.options[0].choices) assert.equal(commandAction(interaction(choice.value)), choice.value);
@@ -37,6 +37,14 @@ test('command request form has its own submission ID and keeps vacation-button f
   assert.equal(command.custom_id, CLAN_TIMEOFF_MODAL);
   assert.equal(vacationModal('2026-10-20').toJSON().custom_id, VACATION_MODAL);
   assert.deepEqual(command.components.map(row => row.components[0].custom_id), ['start', 'days', 'reason']);
+});
+
+test('donation management requires configured leadership even for administrators', () => {
+  for (const action of ['donation-link', 'donation-scan', 'donation-verify', 'donation-void']) {
+    assert.throws(() => checkAccess({ ...interaction(action), memberPermissions: new PermissionsBitField(PermissionFlagsBits.Administrator) }, 'server'), /Leaders or Co-leaders/);
+    assert.doesNotThrow(() => checkAccess({ ...interaction(action), member: { roles: ['1532826140086112256'] } }, 'server'));
+  }
+  assert.doesNotThrow(() => checkAccess(interaction('donation-total'), 'server'));
 });
 
 test('registration replaces legacy commands only after the new command succeeds', async () => {

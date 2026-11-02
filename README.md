@@ -10,7 +10,31 @@ Checks only human members with the **Patient** role, ID `1532826238572298451`, f
 - Shortly after 6:00 AM, the bot **pings yesterday's missing members in the donation channel**, explicitly naming the missed date. Approved days off for that date exclude members from the ping list. The new day's proof does not count for yesterday.
 - Members on approved time off receive `[Vacation]` on their nickname and appear as **Excused** in reports. Pending requests do not excuse them. Their original nickname is restored—or changed to `[No Donation Proof]` if needed—when the vacation ends.
 
-The bot checks that an image was uploaded. Officers still need to verify that the image proves the donation and meets the required amount.
+Daily proof tracking checks that an image was uploaded. AI donation totals use the separate leader-verification workflow below; pending or failed scans do not change daily proof reminders.
+
+## AI donation totals and verification
+
+Set `OPENAI_API_KEY` in Railway Variables (or local `.env`), then restart/redeploy the bot. `OPENAI_VISION_MODEL` defaults to `gpt-4o-mini` and may be set to another model supporting image input and structured outputs. Without a key, existing proof acknowledgements and daily tracking continue; AI scanning is disabled. Never post keys in Discord or commit them. No extra npm dependency is needed.
+
+New image submissions from tracked members and configured leaders in the donation proof channel are scanned automatically. The bot reads only green game system notices such as `08:09 /// Tomhawky donated 2 000 Gems to the Clan!`, ignoring chat and quest notices. It extracts all visible donation lines from up to five images (10 MB each), including cropped screenshots and different resolutions. Images are downloaded into memory and sent to OpenAI for scanning; the request uses `store: false`. The bot saves extracted text, image hashes, links and approval history in the existing persistent state file, not image files.
+
+The bot replies with the extracted names and amounts. Its original custom check reaction means **received**, not credited. A member with a configured **Leader / approval role** must compare the extracted values with the screenshot, then click that custom reaction on the original screenshot. The bot credits the linked donors exactly once, updates its scan reply, and adds **✅**. Other users' reactions do nothing; Administrator permission and Asylum Staff alone do not grant donation approval. Removing a reaction does not reverse credit. Approval applies to all donation lines in the message together and fails without partial credit if any name is unlinked or text is unclear.
+
+Commands (all replies are private):
+
+| Command | Who | Purpose |
+| --- | --- | --- |
+| `/clan action:Link member member:@Someone game-name:Tomhawky` | Leader / approval roles | Link or change the exact in-game name; a name cannot belong to two users |
+| `/clan action:Donation total` | Members | View your verified Gems; optionally choose `member` to view another member |
+| `/clan action:Scan proof proof-id:MESSAGE_ID` | Leader / approval roles | Scan an older/offline submission or retry a failed scan in the current proof channel |
+| `/clan action:Verify proof proof-id:MESSAGE_ID` | Leader / approval roles | Approve a scanned proof, equivalent to the custom check reaction |
+| `/clan action:Void donation proof proof-id:MESSAGE_ID` | Leader / approval roles | Remove all credit from a mistaken proof, preserving its audit record |
+
+Enable Discord Developer Mode and use **Copy Message ID** on the original screenshot for `proof-id`. If a leader reacted before linking a name, link it and remove/re-add that leader's reaction, or use Verify proof. Old reactions are not replayed automatically after downtime. Older/offline submissions need Scan proof; history is not automatically sent to the AI. Proofs and totals persist across restarts. Relinking a name does not transfer previously credited donations to another Discord user. To correct an amount, void the mistaken proof and submit a clearer replacement, then scan and verify it.
+
+Identical image files are rejected if already credited. Matching donor/amount/time lines also block approval to catch overlapping or recompressed screenshots. These images contain no reliable date or transaction ID, so matching lines may be legitimate repeats. After checking the originals, a leader can explicitly use `/clan action:Verify proof proof-id:MESSAGE_ID repeat-confirmed:true` to allow a separate donation with a matching line; this choice is recorded. Identical image files still cannot be overridden. Altered names, missing times and edited screenshots can evade duplicate detection, so leaders must check authenticity and repeats. Unreadable or partially cut-off donation text blocks the entire proof until a clearer replacement is provided. Deleting a credited screenshot does not erase its saved credit; use Void donation proof.
+
+Implementation references: [OpenAI image inputs](https://developers.openai.com/api/docs/guides/images-vision), [structured outputs](https://developers.openai.com/api/docs/guides/structured-outputs), and [Discord gateway intents](https://docs.discord.com/developers/events/gateway).
 
 ## Donation breaks
 

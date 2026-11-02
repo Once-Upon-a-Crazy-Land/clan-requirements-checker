@@ -9,12 +9,21 @@ export const ACTIONS = [
   { name: 'Admin panel', value: 'donation-admin' },
   { name: 'Setup', value: 'setup' },
   { name: 'Donation breaks', value: 'breaks' },
+  { name: 'Link member', value: 'donation-link' },
+  { name: 'Donation total', value: 'donation-total' },
+  { name: 'Scan proof', value: 'donation-scan' },
+  { name: 'Void donation proof', value: 'donation-void' },
+  { name: 'Verify proof', value: 'donation-verify' },
 ];
 export const commands = [new SlashCommandBuilder()
   .setName('clan').setDescription('Donation reports and member time off')
   .addStringOption(o => o.setName('action').setDescription('Choose a clan action')
     .setRequired(true).addChoices(...ACTIONS))
-  .addStringOption(o => o.setName('date').setDescription('Donation report date; leave empty for today'))];
+  .addStringOption(o => o.setName('date').setDescription('Donation report date; leave empty for today'))
+  .addUserOption(o => o.setName('member').setDescription('Member to link or view; totals default to yourself'))
+  .addStringOption(o => o.setName('game-name').setDescription('Exact in-game name to link').setMaxLength(80))
+  .addStringOption(o => o.setName('proof-id').setDescription('Original screenshot message ID to scan, verify or void'))
+  .addBooleanOption(o => o.setName('repeat-confirmed').setDescription('Verify proof only: I checked that a matching line is a separate donation'))];
 
 export function commandAction(interaction) {
   if (interaction.commandName !== 'clan') return interaction.commandName;
