@@ -84,7 +84,11 @@ export function validateScan(data) {
 }
 
 export async function scanImage(image, { apiKey = process.env.OPENAI_API_KEY, model = process.env.OPENAI_VISION_MODEL || 'gpt-4o-mini', fetcher = fetch } = {}) {
+  apiKey = apiKey?.trim();
   if (!apiKey) throw new Error('Set OPENAI_API_KEY in Railway or .env to enable screenshot scanning.');
+  if (/^Bearer\s/i.test(apiKey) || /[\s"']/.test(apiKey)) {
+    throw new Error('OPENAI_API_KEY has quotes, a Bearer prefix or whitespace inside it. Paste only the key into Railway Variables, apply the change and redeploy.');
+  }
   const response = await fetcher('https://api.openai.com/v1/responses', {
     method: 'POST', signal: AbortSignal.timeout(60000),
     headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
@@ -99,7 +103,18 @@ export async function scanImage(image, { apiKey = process.env.OPENAI_API_KEY, mo
       } } },
     }),
   });
-  if (!response.ok) throw new Error(`Image-reading API failed (HTTP ${response.status}). Try Scan proof again later.`);
+  if (!response.ok) {
+    // Never echo the provider message: authentication messages can contain key fragments.
+    const error = await response.json().catch(() => null);
+    const codes = new Set(['invalid_api_key', 'insufficient_quota', 'rate_limit_exceeded', 'model_not_found', 'permission_denied', 'ip_not_authorized']);
+    const code = codes.has(error?.error?.code) ? `; ${error.error.code}` : '';
+    const guidance = response.status === 401
+      ? 'OpenAI rejected authentication. Check OPENAI_API_KEY in the running Railway service/environment, apply pending variable changes and redeploy. If it persists, replace it with a new OpenAI Platform project key. Retrying without changing authentication will not help.'
+      : response.status === 429 && error?.error?.code === 'insufficient_quota'
+        ? 'Check API project billing and available quota before retrying.'
+        : 'Check the API project access or availability, then retry Scan proof.';
+    throw new Error(`Image-reading API failed (HTTP ${response.status}${code}). ${guidance}`);
+  }
   const result = await response.json();
   if (result.status !== 'completed') throw new Error('The AI scan did not finish. Try Scan proof again.');
   const output = result.output?.flatMap(item => item.content || []).filter(c => c.type === 'output_text').map(c => c.text).join('');

@@ -91,3 +91,21 @@ test('Responses request uses strict schema, high detail and no response storage'
   assert.equal(result.rows[0].amount, 66666);
   await assert.rejects(scanImage('x', { apiKey: 'x', fetcher: async () => new Response('', { status: 429 }) }), /HTTP 429/);
 });
+
+test('authentication diagnostics never expose provider messages or credentials', async () => {
+  await assert.rejects(scanImage('x', { apiKey: 'test-key', fetcher: async () => Response.json({ error: {
+    code: 'invalid_api_key', message: 'Incorrect API key provided: secret-key-fragment',
+  } }, { status: 401 }) }), error => {
+    assert.match(error.message, /401; invalid_api_key/);
+    assert.match(error.message, /running Railway service/);
+    assert.doesNotMatch(error.message, /secret-key-fragment/);
+    return true;
+  });
+  for (const apiKey of ['Bearer test-key', '"test-key"', 'test key']) {
+    await assert.rejects(scanImage('x', { apiKey, fetcher: () => { throw new Error('Must not call API'); } }), /Paste only the key/);
+  }
+  await assert.rejects(scanImage('x', { apiKey: '  test-key\n', fetcher: async (url, options) => {
+    assert.equal(options.headers.Authorization, 'Bearer test-key');
+    return new Response('', { status: 401 });
+  } }), /401/);
+});
