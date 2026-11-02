@@ -228,3 +228,32 @@ test('staff role is optional, persisted, clearable and distinct from membership 
   sessions.selectValues(session, []);
   assert.equal(session.draft.staffRoleId, null);
 });
+
+test('staff role selection survives real state reload and a reopened Setup session', t => {
+  const dir = mkdtempSync(join(tmpdir(), 'staff-setup-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const path = join(dir, 'state.json');
+  const store = new Store(path, '2026-11-02', 'guild', 'Europe/Paris');
+  const sessions = new SetupSessions();
+  const session = sessions.open('admin', 'guild', store.data);
+  sessions.selectField(session, 'staffRoleId');
+  const selector = setupView(session).components[1].toJSON().components[0];
+  assert.equal(selector.custom_id, `setup:${session.id}:value:staffRoleId`);
+  sessions.selectValues(session, [ids.extra], 'staffRoleId');
+  saveSettings(store, session.draft, session.revision);
+  const restored = new Store(path, '2026-11-03', 'guild', 'Europe/Paris');
+  const reopened = new SetupSessions().open('admin', 'guild', restored.data);
+  assert.equal(reopened.draft.staffRoleId, ids.extra);
+  assert.equal(setupView(reopened).embeds[0].toJSON().fields.find(f => f.name.startsWith('Staff role')).value, `<@&${ids.extra}>`);
+});
+
+test('a delayed selector cannot clear or replace a different setup field and save status is prominent', () => {
+  const sessions = new SetupSessions();
+  const session = sessions.open('admin', 'guild', {});
+  sessions.selectField(session, 'staffRoleId');
+  sessions.selectValues(session, [ids.extra], 'staffRoleId');
+  assert.throws(() => sessions.selectValues(session, [], 'visitorRoleId'), /older Setup view/);
+  assert.equal(session.draft.staffRoleId, ids.extra);
+  const view = setupView(session, 'Could not save setup: permission error');
+  assert.ok(view.embeds[0].toJSON().description.startsWith('Could not save setup: permission error'));
+});

@@ -212,7 +212,7 @@ async function applyConfiguration(channels) {
 
 async function handleSetup(interaction) {
   checkAccess(interaction, GUILD_ID, settings());
-  const [, id, operation] = interaction.customId.split(':');
+  const [, id, operation, selectedField] = interaction.customId.split(':');
   const session = setupSessions.get(id, interaction.user.id, interaction.guildId);
   if (operation === 'visitor') {
     setupSessions.selectField(session, 'visitorRoleId');
@@ -227,7 +227,10 @@ async function handleSetup(interaction) {
     return interaction.editReply(setupView(session, 'Daily amount updated in your draft. Press **Save setup** to apply it.'));
   }
   if (operation === 'field') setupSessions.selectField(session, interaction.values?.[0]);
-  else if (operation === 'value') setupSessions.selectValues(session, interaction.values);
+  else if (operation === 'value') {
+    setupSessions.selectValues(session, interaction.values, selectedField || 'expired-selector');
+    return interaction.editReply(setupView(session, `**${selectedField === 'staffRoleId' ? 'Staff role' : 'Selection'} updated in draft.** Press **Save setup** to keep this change.`));
+  }
   else if (operation === 'save') {
     try {
       const channels = await validateSettings(configuredGuild, session.draft);

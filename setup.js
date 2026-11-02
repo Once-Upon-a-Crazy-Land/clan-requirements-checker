@@ -26,7 +26,8 @@ export class SetupSessions {
     if (!Object.hasOwn(SETTINGS_FIELDS, field)) throw new Error('Unknown setup setting.');
     session.field = field;
   }
-  selectValues(session, values) {
+  selectValues(session, values, selectedField = session.field) {
+    if (selectedField !== session.field) throw new Error('This selector is from an older Setup view. Choose Staff role (or your setting) again, then select its value.');
     const field = SETTINGS_FIELDS[session.field];
     if (field.kind === 'number') throw new Error('Use the daily Gems amount form for this setting.');
     if (!Array.isArray(values) || values.length < (field.min ?? 1) || values.length > (field.kind === 'roles' ? 10 : 1)
@@ -58,17 +59,18 @@ export function setupView(session, status = '') {
     : field.kind === 'channel'
     ? new ChannelSelectMenuBuilder().setChannelTypes(ChannelType.GuildText).setDefaultChannels(...values)
     : new RoleSelectMenuBuilder().setDefaultRoles(...values);
-  if (field.kind !== 'number') valueMenu.setCustomId(`${prefix}:value`).setPlaceholder(`Choose ${field.label.toLowerCase()}`)
+  if (field.kind !== 'number') valueMenu.setCustomId(`${prefix}:value:${session.field}`).setPlaceholder(`Choose ${field.label.toLowerCase()}`)
     .setMinValues(field.min ?? 1).setMaxValues(field.kind === 'roles' ? 10 : 1);
   return {
     ...brandedMessage('Crazyland clan setup.',
-      'Choose a setting, then select its channel or roles below. Changes take effect when you press **Save setup**.\n\n'
+      (status ? `${status.slice(0, 1200)}\n\n` : '')
+      + `**Editing: ${field.label}**\nChoose the actual ${field.kind === 'channel' ? 'channel' : field.kind === 'number' ? 'amount using the button' : 'role(s)'} below, then press **Save setup**. Choosing a setting in the first menu alone does not change its value.\n\n`
       + 'The member role is automatically assigned to human users who lack it, except Patient No More and Visitor. Members, leaders and additional time-off roles can request vacations. Leadership roles can approve them.\n'
       + 'Assigning Patient, Patient No More or Visitor removes the other two membership roles. Use **Set Visitor role** below to configure Visitor. Patient No More and Visitor stop donation tracking and remove bot nickname tags.\n'
       + 'Choose an optional Staff role shared by elders, co-leaders and leaders. Anyone with it has Patient, Patient No More and Visitor removed, and will not receive the member role. Approval permissions still use Leader / approval roles.\n'
       + 'Choose a Monthly donation leaderboard channel to post the previous month’s verified Gems on the first of each month. Clear it to disable.\n'
       + 'Daily required Gems converts verified donations into prepaid days. Leftover Gems carry forward. Change the amount, then Save setup.\n'
-      + 'Saving posts or updates the Vacation notice in your chosen channel.\n' + status.slice(0, 1200), { fields }),
+      + 'Saving posts or updates the Vacation notice in your chosen channel.\n', { fields }),
     attachments: [],
     components: [new ActionRowBuilder().addComponents(settingMenu), new ActionRowBuilder().addComponents(valueMenu),
       new ActionRowBuilder().addComponents(
