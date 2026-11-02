@@ -251,6 +251,6 @@ export function proofView(proof) {
   if (['pending', 'approved'].includes(proof.status)) payload.components = [new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`donation-review:${proof.status === 'approved' ? 'undo' : 'approve'}:${proof.id}:${proofReviewToken(proof)}`)
       .setLabel(proof.status === 'approved' ? 'Unverify donation' : 'Verify donation')
-      .setStyle(proof.status === 'approved' ? ButtonStyle.Danger : ButtonStyle.Success))];
+      .setStyle(ButtonStyle.Danger))];
   return payload;
 }

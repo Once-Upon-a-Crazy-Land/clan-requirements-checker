@@ -26,8 +26,8 @@ export function breaksView(data, today, timezone, status = '') {
       + (lines.join('\n\n') + (pending.length > 8 ? '\n\nMore breaks are scheduled; finish the earliest to manage the next.' : '') || 'No active or scheduled donation breaks.') + (status ? `\n\n${status.slice(0, 1200)}` : '')),
     attachments: [],
     components: [new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('breaks:create').setLabel('Create break').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('breaks:create').setLabel('Create break').setStyle(ButtonStyle.Danger),
       ...(current ? [new ButtonBuilder().setCustomId(`breaks:end:${current.id}`).setLabel(current.start > today ? 'Cancel next break' : 'End current break').setStyle(ButtonStyle.Danger)] : []),
-      new ButtonBuilder().setCustomId('breaks:refresh').setLabel('Refresh').setStyle(ButtonStyle.Secondary))],
+      new ButtonBuilder().setCustomId('breaks:refresh').setLabel('Refresh').setStyle(ButtonStyle.Danger))],
   };
 }

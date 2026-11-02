@@ -55,7 +55,7 @@ export function setupView(session, status = '') {
     .addOptions(Object.entries(SETTINGS_FIELDS).map(([key, value]) => ({ label: value.label, value: key, default: key === session.field })));
   const values = Array.isArray(session.draft[session.field]) ? session.draft[session.field] : [session.draft[session.field]].filter(Boolean);
   const valueMenu = field.kind === 'number'
-    ? new ButtonBuilder().setCustomId(`${prefix}:amount`).setLabel('Set daily required Gems').setStyle(ButtonStyle.Primary)
+    ? new ButtonBuilder().setCustomId(`${prefix}:amount`).setLabel('Set daily required Gems').setStyle(ButtonStyle.Danger)
     : field.kind === 'channel'
     ? new ChannelSelectMenuBuilder().setChannelTypes(ChannelType.GuildText).setDefaultChannels(...values)
     : new RoleSelectMenuBuilder().setDefaultRoles(...values);
@@ -74,9 +74,9 @@ export function setupView(session, status = '') {
     attachments: [],
     components: [new ActionRowBuilder().addComponents(settingMenu), new ActionRowBuilder().addComponents(valueMenu),
       new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId(`${prefix}:visitor`).setLabel('Set Visitor role').setStyle(ButtonStyle.Primary),
-        new ButtonBuilder().setCustomId(`${prefix}:save`).setLabel('Save setup').setStyle(ButtonStyle.Success),
-        new ButtonBuilder().setCustomId(`${prefix}:cancel`).setLabel('Cancel').setStyle(ButtonStyle.Secondary))],
+        new ButtonBuilder().setCustomId(`${prefix}:visitor`).setLabel('Set Visitor role').setStyle(ButtonStyle.Danger),
+        new ButtonBuilder().setCustomId(`${prefix}:save`).setLabel('Save setup').setStyle(ButtonStyle.Danger),
+        new ButtonBuilder().setCustomId(`${prefix}:cancel`).setLabel('Cancel').setStyle(ButtonStyle.Danger))],
   };
 }
 

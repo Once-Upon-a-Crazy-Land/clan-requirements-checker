@@ -8,7 +8,7 @@ function adminButtons() {
   const buttons = [ ['list', 'Requests & days off'], ['grant', 'Grant days off'],
     ['approve', 'Approve request'], ['reject', 'Reject request'], ['revoke', 'Revoke days off'] ];
   return new ActionRowBuilder().addComponents(buttons.map(([action, label]) =>
-    new ButtonBuilder().setCustomId(`admin:${action}`).setLabel(label).setStyle(ButtonStyle.Secondary)));
+    new ButtonBuilder().setCustomId(`admin:${action}`).setLabel(label).setStyle(ButtonStyle.Danger)));
 }
 
 export function panel(store, automation, today, timezone) {

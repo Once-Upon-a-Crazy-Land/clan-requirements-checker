@@ -33,8 +33,8 @@ export function listMessage(title, intro, blocks, requestedPage, buttonPrefix, o
   // Editing an old panel explicitly removes its obsolete text-file cards.
   message.attachments = [];
   message.components = pages.length > 1 ? [new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(`${buttonPrefix}:${Math.max(0, page - 1)}`).setLabel('Previous').setStyle(ButtonStyle.Secondary).setDisabled(page === 0),
-    new ButtonBuilder().setCustomId(`${buttonPrefix}:${page + 1}`).setLabel('Next').setStyle(ButtonStyle.Secondary).setDisabled(page === pages.length - 1),
+    new ButtonBuilder().setCustomId(`${buttonPrefix}:${Math.max(0, page - 1)}`).setLabel('Previous').setStyle(ButtonStyle.Danger).setDisabled(page === 0),
+    new ButtonBuilder().setCustomId(`${buttonPrefix}:${page + 1}`).setLabel('Next').setStyle(ButtonStyle.Danger).setDisabled(page === pages.length - 1),
   )] : [];
   return message;
 }
@@ -90,7 +90,7 @@ export function timeoffRequestNotice(request, decision, adminId) {
   message.attachments = [];
   message.components = decision ? [] : [new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`timeoff-review:approve:${request.id}`)
-      .setLabel('Approve').setStyle(ButtonStyle.Success),
+      .setLabel('Approve').setStyle(ButtonStyle.Danger),
     new ButtonBuilder().setCustomId(`timeoff-review:reject:${request.id}`)
       .setLabel('Reject').setStyle(ButtonStyle.Danger),
   )];
