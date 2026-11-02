@@ -314,7 +314,7 @@ test('nickname checks clean up submitted, excused and former Patient members', a
 test('slash commands, private admin panel and all modals serialize against installed Discord library', t => {
   const store = makeStore(t);
   const { automation } = fakeAutomation(t, store);
-  assert.equal(commands.length, 1);
+  assert.equal(commands.length, 2);
   for (const command of commands) assert.ok(command.toJSON().name);
   const data = panel(store, automation, '2026-09-14', 'Europe/Paris');
   assert.equal(data.components[0].toJSON().components.length, 5);

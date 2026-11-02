@@ -5,18 +5,26 @@ import { commands, commandAction, registerCommands, CLAN_TIMEOFF_MODAL } from '.
 import { checkAccess } from './access.js';
 import { vacationModal, VACATION_MODAL } from './vacation-panel.js';
 
-const interaction = action => ({ guildId: 'server', commandName: 'clan', options: {
+const interaction = action => ({ guildId: 'server', commandName: ['donation-link', 'donation-total', 'donation-scan', 'donation-void', 'donation-verify'].includes(action) ? 'donation' : 'clan', options: {
   getString: (name, required) => { assert.equal(name, 'action'); assert.equal(required, true); return action; },
 } });
 
-test('one clan command exposes clan and donation actions and an optional report date', () => {
-  assert.equal(commands.length, 1);
+test('clan and donation commands expose separate actions and relevant options', () => {
+  assert.equal(commands.length, 2);
   const command = commands[0].toJSON();
   assert.equal(command.name, 'clan');
   assert.equal(command.default_member_permissions, undefined);
   assert.equal(command.options[0].name, 'action');
   assert.equal(command.options[0].required, true);
-  assert.deepEqual(command.options[0].choices.map(c => c.name), ['Donation report', 'Request time off', 'My time off', 'Admin panel', 'Setup', 'Donation breaks', 'Link member', 'Donation total', 'Scan proof', 'Void donation proof', 'Verify proof']);
+  assert.deepEqual(command.options[0].choices.map(c => c.name), ['Donation report', 'Request time off', 'My time off', 'Admin panel', 'Setup', 'Donation breaks']);
+  assert.deepEqual(command.options.map(o => o.name), ['action', 'date']);
+  const donation = commands[1].toJSON();
+  assert.equal(donation.name, 'donation');
+  assert.deepEqual(donation.options[0].choices.map(c => c.name), ['Link member', 'Donation total', 'Scan proof', 'Void donation proof', 'Verify proof']);
+  assert.deepEqual(donation.options.map(o => o.name), ['action', 'member', 'game-name', 'proof-id', 'repeat-confirmed']);
+  for (const choice of donation.options[0].choices) assert.equal(commandAction(interaction(choice.value)), choice.value);
+  assert.throws(() => commandAction({ ...interaction('donation-scan'), commandName: 'clan' }), /valid clan action/);
+  assert.throws(() => commandAction({ ...interaction('timeoff'), commandName: 'donation' }), /valid donation action/);
   assert.equal(command.options[1].name, 'date');
   assert.ok(!command.options[1].required);
   for (const choice of command.options[0].choices) assert.equal(commandAction(interaction(choice.value)), choice.value);
@@ -56,7 +64,7 @@ test('registration replaces legacy commands only after the new command succeeds'
     delete: async id => events.push(['delete', id]),
   } };
   await registerCommands(guild);
-  assert.deepEqual(events, [['create', 'clan'], ['delete', 'donations'], ['delete', 'timeoff'], ['delete', 'timeoff-status'], ['delete', 'donation-admin']]);
+  assert.deepEqual(events, [['create', 'clan'], ['create', 'donation'], ['delete', 'donations'], ['delete', 'timeoff'], ['delete', 'timeoff-status'], ['delete', 'donation-admin']]);
   events.length = 0;
   guild.commands.create = async () => { throw new Error('Registration unavailable'); };
   await assert.rejects(registerCommands(guild), /Registration unavailable/);

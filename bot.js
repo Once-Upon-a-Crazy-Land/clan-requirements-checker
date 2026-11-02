@@ -263,7 +263,7 @@ client.on(Events.MessageCreate, async message => {
     if (process.env.OPENAI_API_KEY) {
       void enqueueScan(message).catch(async error => {
         console.error('Donation scan:', error.message);
-        try { await message.reply({ ...brandedMessage('Crazyland clan donation scan.', 'Scan failed. No donation was credited. A leader can use /clan action:Scan proof to retry.'), allowedMentions: { parse: [], repliedUser: false } }); }
+        try { await message.reply({ ...brandedMessage('Crazyland clan donation scan.', 'Scan failed. No donation was credited. A leader can use /donation action:Scan proof to retry.'), allowedMentions: { parse: [], repliedUser: false } }); }
         catch (replyError) { console.error('Scan notice:', replyError.message); }
       });
     }
