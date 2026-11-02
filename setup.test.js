@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PermissionsBitField, PermissionFlagsBits, ChannelType, Collection } from 'discord.js';
 import { defaultSettings, getSettings, validateSettings, saveSettings, SETTINGS_FIELDS } from './configuration.js';
-import { SetupSessions, setupView } from './setup.js';
+import { SetupSessions, setupView, dailyGemsModal } from './setup.js';
 import { Store, classify, canRequestTimeoff } from './state.js';
 import { checkAccess } from './access.js';
 import { Automation } from './automation.js';
@@ -100,7 +100,7 @@ test('every setup field renders native channel/role pickers and optional roles c
     const view = setupView(session);
     assert.equal(view.components.length, 3);
     const menu = view.components[1].toJSON().components[0];
-    assert.equal(menu.type, field.kind === 'channel' ? 8 : 6);
+    assert.equal(menu.type, field.kind === 'number' ? 2 : field.kind === 'channel' ? 8 : 6);
     if (field.kind === 'channel') assert.deepEqual(menu.channel_types, [ChannelType.GuildText]);
     assert.equal(view.allowedMentions.parse.length, 0);
   }
@@ -108,6 +108,25 @@ test('every setup field renders native channel/role pickers and optional roles c
   sessions.selectValues(session, []);
   assert.deepEqual(session.draft.timeoffRoleIds, []);
   assert.equal(setupView(session).components[1].toJSON().components[0].min_values, 0);
+});
+
+test('daily required Gems editor validates whole amounts, isolates drafts and persists after save', () => {
+  const sessions = new SetupSessions();
+  const store = { data: { requests: {} }, save() {} };
+  const session = sessions.open('admin', 'guild', store.data);
+  assert.equal(session.draft.dailyDonationGems, 1000);
+  for (const value of ['0', '-1', '1.5', '1e3', '1000000001', 'abc', '1,000']) {
+    assert.throws(() => sessions.setDailyGems(session, value), /whole Gems/);
+  }
+  sessions.setDailyGems(session, '2500');
+  assert.equal(getSettings(store.data).dailyDonationGems, 1000);
+  saveSettings(store, session.draft, 0);
+  assert.equal(getSettings(store.data).dailyDonationGems, 2500);
+  const modal = dailyGemsModal(session).toJSON();
+  assert.equal(modal.custom_id, `setup:${session.id}:amount-submit`);
+  assert.equal(modal.components[0].components[0].value, '2500');
+  assert.throws(() => saveSettings(store, { ...session.draft, dailyDonationGems: 0 }, 1), /whole Gems/);
+  assert.throws(() => checkAccess({ guildId: 'guild', customId: modal.custom_id }, 'guild'), /administrators/);
 });
 
 test('validation resolves all selected channels and roles and rejects inaccessible or foreign selections', async () => {
@@ -191,4 +210,21 @@ test('Setup explains missing membership role permissions and hierarchy', async (
   const guild = guildFixture(config);
   guild.members.fetchMe = async () => ({ permissions: new PermissionsBitField(PermissionFlagsBits.ManageNicknames) });
   await assert.rejects(validateSettings(guild, config), /Manage Roles/);
+});
+
+test('staff role is optional, persisted, clearable and distinct from membership roles', async () => {
+  const sessions = new SetupSessions();
+  const store = { data: { requests: {} }, save() {} };
+  const session = sessions.open('admin', 'guild', store.data);
+  sessions.selectField(session, 'staffRoleId');
+  sessions.selectValues(session, [ids.extra]);
+  assert.equal(setupView(session).components[1].toJSON().components[0].min_values, 0);
+  await validateSettings(guildFixture(), session.draft);
+  saveSettings(store, session.draft, 0);
+  assert.equal(getSettings(store.data).staffRoleId, ids.extra);
+  for (const key of ['memberRoleId', 'formerMemberRoleId', 'visitorRoleId']) {
+    await assert.rejects(validateSettings(guildFixture(), { ...chosen(), [key]: ids.extra, staffRoleId: ids.extra }), /staff role different/);
+  }
+  sessions.selectValues(session, []);
+  assert.equal(session.draft.staffRoleId, null);
 });

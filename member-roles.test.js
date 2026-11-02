@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { PermissionFlagsBits as P, PermissionsBitField } from 'discord.js';
-import { assignMemberRoles } from './member-roles.js';
+import { assignMemberRoles, reconcileMembershipRoles } from './member-roles.js';
 import { defaultSettings } from './configuration.js';
 import { Automation } from './automation.js';
 
@@ -191,4 +191,37 @@ test('Visitor prevents automatic Patient assignment', async () => {
   const result = await assignMemberRoles(f.guild, f.config);
   assert.deepEqual(result.errors, []);
   assert.deepEqual(f.assigned, []);
+});
+
+test('configured staff removes all membership statuses on updates and periodic sync, preserving rank roles', async () => {
+  for (const mode of ['update', 'sync']) {
+    const f = fixture();
+    f.config.staffRoleId = '66666666666666666';
+    f.config.visitorRoleId = '77777777777777777';
+    const statuses = [f.config.memberRoleId, f.config.formerMemberRoleId, f.config.visitorRoleId];
+    const current = f.make('staff', [...statuses, f.config.staffRoleId, 'elder']);
+    current.guild = f.guild;
+    const removed = [];
+    current.roles.remove = async id => { removed.push(id); current.roles.cache.delete(id); return current; };
+    f.guild.roles.fetch = async id => ({ ...f.role, id });
+    f.members.set(current.id, current);
+    if (mode === 'update') {
+      await reconcileMembershipRoles(f.make('staff', statuses), current, f.config);
+      // Adding a membership status while staff is already present must also be corrected.
+      const previous = f.make('staff', [f.config.staffRoleId, 'elder']);
+      current.roles.cache.set(f.config.visitorRoleId, {});
+      await reconcileMembershipRoles(previous, current, f.config);
+      assert.deepEqual(removed, [...statuses, f.config.visitorRoleId]);
+    } else {
+      const result = await assignMemberRoles(f.guild, f.config);
+      assert.deepEqual(result.errors, []);
+      assert.deepEqual(removed, statuses);
+    }
+    assert.deepEqual([...current.roles.cache.keys()], [f.config.staffRoleId, 'elder']);
+    await assignMemberRoles(f.guild, f.config);
+    assert.deepEqual(f.assigned, []);
+    f.members.set('staff', f.make('staff', ['elder']));
+    await assignMemberRoles(f.guild, f.config);
+    assert.deepEqual(f.assigned, [['staff', f.config.memberRoleId]]);
+  }
 });

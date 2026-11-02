@@ -4,9 +4,9 @@ import { donationBreaks } from './break-state.js';
 export function defaultSettings() {
   const donation = process.env.DONATION_CHANNEL_ID || '1535655837828382740';
   return {
-    donationChannelId: donation, reminderChannelId: donation, leaderboardChannelId: null,
+    donationChannelId: donation, reminderChannelId: donation, leaderboardChannelId: null, dailyDonationGems: 1000,
     vacationChannelId: '1549128315095355422', adminChannelId: '1537173435611090944',
-    memberRoleId: '1532826238572298451', formerMemberRoleId: null, visitorRoleId: null,
+    memberRoleId: '1532826238572298451', formerMemberRoleId: null, visitorRoleId: null, staffRoleId: null,
     leaderRoleIds: ['1532826140086112256', '1532826772624769316'],
     timeoffRoleIds: ['1532826889499185302'],
   };
@@ -15,6 +15,7 @@ export function getSettings(data = {}) {
   return structuredClone({ ...defaultSettings(), ...data.settings });
 }
 export const isFormerMember = (member, settings) => Boolean([settings.formerMemberRoleId, settings.visitorRoleId].some(id => id && member.roles.cache.has(id)));
+export const hasStaffRole = (member, settings) => Boolean(settings.staffRoleId && member.roles.cache.has(settings.staffRoleId));
 export const isAsylumStaff = member => [...member.roles.cache.values()]
   .some(role => role.name?.trim().replace(/\s+/g, ' ').toLowerCase() === 'asylum staff');
 export const isClanLeader = (member, settings) => isAsylumStaff(member)
@@ -23,6 +24,7 @@ export const requestRoleIds = settings => [...new Set([
   settings.memberRoleId, ...settings.leaderRoleIds, ...settings.timeoffRoleIds,
 ])];
 export const SETTINGS_FIELDS = {
+  dailyDonationGems: { label: 'Daily required donation (Gems)', kind: 'number' },
   vacationChannelId: { label: 'Vacation notice channel', kind: 'channel' },
   donationChannelId: { label: 'Donation proof channel', kind: 'channel' },
   reminderChannelId: { label: 'Donation reminder channel', kind: 'channel' },
@@ -31,6 +33,7 @@ export const SETTINGS_FIELDS = {
   memberRoleId: { label: 'Tracked member role', kind: 'role' },
   formerMemberRoleId: { label: 'No longer a member role', kind: 'role', min: 0 },
   visitorRoleId: { label: 'Visitor role', kind: 'role', min: 0 },
+  staffRoleId: { label: 'Staff role (elders / co-leaders / leaders)', kind: 'role', min: 0 },
   leaderRoleIds: { label: 'Leader / approval roles', kind: 'roles', min: 1 },
   timeoffRoleIds: { label: 'Additional time-off roles', kind: 'roles', min: 0 },
 };
@@ -40,7 +43,10 @@ export function normalizeSettings(settings) {
   const id = value => typeof value === 'string' && /^\d{17,20}$/.test(value);
   for (const [key, field] of Object.entries(SETTINGS_FIELDS)) {
     const value = settings[key];
-    if (field.kind === 'roles') {
+    if (field.kind === 'number') {
+      if (!Number.isSafeInteger(value) || value < 1 || value > 1000000000) throw new Error('Daily required donation must be 1–1,000,000,000 whole Gems.');
+      result[key] = value;
+    } else if (field.kind === 'roles') {
       if (!Array.isArray(value) || value.length < field.min || value.length > 10 || !value.every(id)) {
         throw new Error(`Choose ${field.min}–10 roles for ${field.label}.`);
       }
@@ -55,6 +61,7 @@ export function normalizeSettings(settings) {
   if (result.formerMemberRoleId === result.memberRoleId) throw new Error('Choose different tracked member and no-longer-a-member roles.');
   const roles = [result.memberRoleId, result.formerMemberRoleId, result.visitorRoleId].filter(Boolean);
   if (new Set(roles).size !== roles.length) throw new Error('Choose different Patient, Patient No More and Visitor roles.');
+  if (roles.includes(result.staffRoleId)) throw new Error('Choose a staff role different from the three membership roles.');
   return result;
 }
 
@@ -78,7 +85,7 @@ export async function validateSettings(guild, settings) {
     channels[key] = channel;
   }
   const membershipRoles = [];
-  for (const roleId of new Set([...requestRoleIds(settings), ...[settings.formerMemberRoleId, settings.visitorRoleId].filter(Boolean)])) {
+  for (const roleId of new Set([...requestRoleIds(settings), ...[settings.formerMemberRoleId, settings.visitorRoleId, settings.staffRoleId].filter(Boolean)])) {
     const role = await guild.roles.fetch(roleId);
     if (!role || role.guild.id !== guild.id || role.id === guild.id || role.managed) {
       throw new Error('Choose member and leadership roles from this server; everyone and bot-managed roles are not supported.');

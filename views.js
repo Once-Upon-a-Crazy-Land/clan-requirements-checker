@@ -99,13 +99,15 @@ export function timeoffRequestNotice(request, decision, adminId) {
 
 export function donationView(report, day, today, timezone, page = 0) {
   const blocks = [
-    ...(report.submitted.length ? report.submitted.map(m => `**Submitted** · <@${m.id}>\n[View donation proof](${report.submissions.get(m.id)})`) : ['**Submitted**\nNo proof received.']),
+    ...(report.submitted.length ? report.submitted.map(m => report.useCoverage
+      ? `**Covered by verified donations** · <@${m.id}>\n${report.coverage.get(m.id).remainingDays} prepaid day(s) remaining after this date.`
+      : `**Submitted** · <@${m.id}>\n[View donation proof](${report.submissions.get(m.id)})`) : [report.useCoverage ? '**Covered**\nNo members covered by verified donations.' : '**Submitted**\nNo proof received.']),
     ...(report.missing.length ? report.missing.map(m => `**Missing proof** · <@${m.id}>`) : ['**Missing proof**\nNobody is missing proof.']),
     ...(report.excused.length ? report.excused.map(m => `**Excused** · <@${m.id}>`) : ['**Excused**\nNo members on approved days off.']),
   ];
   return listMessage('Crazyland clan donation report.', `**${formatTimeoffDate(day)}** · ${timezone}\nTracking **${report.roster.length}** current members.${report.pause ? `\nDonations paused: **${safe(report.pause.name)}**.` : ''}${day === today ? '\nToday is still in progress.' : ''}`,
     blocks, page, `report-page:${day}`, { fields: [
-      { name: 'Submitted', value: String(report.submitted.length), inline: true },
+      { name: report.useCoverage ? 'Covered' : 'Submitted', value: String(report.submitted.length), inline: true },
       { name: 'Missing proof', value: String(report.missing.length), inline: true },
       { name: 'Excused', value: String(report.excused.length), inline: true },
     ] });

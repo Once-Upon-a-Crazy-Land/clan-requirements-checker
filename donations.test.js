@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DonationLedger, canVerifyDonation, scanProof, scanImage, validateScan, visionConfiguration, visionEnabled } from './donations.js';
+import { DonationLedger, canVerifyDonation, scanProof, scanImage, validateScan, visionConfiguration, visionEnabled, proofReviewToken, proofView } from './donations.js';
 const settings = { leaderRoleIds: ['leader', 'coleader'] };
 const member = role => ({ id: 'officer', user: { bot: false }, roles: { cache: new Map([[role, {}]]) } });
 const leader = member('leader');
@@ -86,6 +86,7 @@ test('Responses request uses strict schema, high detail and no response storage'
     assert.equal(body.store, false);
     assert.equal(body.text.format.strict, true);
     assert.equal(body.input[0].content[0].detail, 'high');
+    assert.match(body.instructions, /must not block other complete readable rows/);
     return Response.json({ status: 'completed', output: [{ content: [{ type: 'output_text', text: JSON.stringify({ unclear: false, rows: [{ name: 'Bunrey', amount: 66666, time: '00:21' }] }) }] }] });
   } });
   assert.equal(result.rows[0].amount, 66666);
@@ -149,4 +150,51 @@ test('Gemini quota, blocked, unfinished and malformed responses fail without exp
     await assert.rejects(scanImage('data:image/png;base64,aA==', { ...options, fetcher: async () => Response.json(response) }), /No donation was credited/);
   }
   await assert.rejects(scanImage('x', { provider: 'openai', apiKey: 'AIza-test', fetcher: () => { throw new Error('Must not call OpenAI'); } }), /GEMINI_API_KEY/);
+});
+
+test('a partial-only attachment does not block another readable donation, but uncertain returned rows do', async () => {
+  const { ledger } = fixture();
+  const message = { id: 'mixed-proof', channelId: 'channel', author: { id: 'uploader' }, attachments: new Map(
+    ['a', 'b'].map(id => [id, { id, url: `https://cdn.discordapp.com/attachments/${id}.png`, contentType: 'image/png', width: 200, height: 20, size: 10 }])) };
+  let call = 0;
+  const proof = await scanProof(message, ledger, { fetcher: async () => new Response(`image-${call}`), scanner: async () => ++call === 1
+    ? { unclear: true, rows: [] } : { unclear: false, rows: [{ name: 'Panos', amount: 5000, time: '23:15' }] } });
+  assert.equal(proof.status, 'pending');
+  assert.deepEqual(proof.rows, [{ name: 'Panos', amount: 5000, time: '23:15' }]);
+  const uncertain = await scanProof(message, ledger, { fetcher: async () => new Response('uncertain'), scanner: async () =>
+    ({ unclear: true, rows: [{ name: 'Panos', amount: 5000, time: '23:15' }] }) });
+  assert.equal(uncertain.status, 'review');
+});
+
+test('removing the approving leader reaction undoes credit once; others cannot undo it by removing their reactions', () => {
+  const { ledger } = fixture();
+  ledger.approve('proof', leader, settings, 'attachment', false, 'reaction');
+  const other = { ...member('coleader'), id: 'other-leader' };
+  ledger.unverify('proof', other, settings, true);
+  assert.equal(ledger.total('discord-user'), 2000);
+  assert.throws(() => ledger.unverify('proof', member('normal'), settings, true), /Only/);
+  ledger.unverify('proof', leader, settings, true);
+  assert.equal(ledger.total('discord-user'), 0);
+  assert.equal(ledger.data.proofs.proof.status, 'pending');
+  assert.equal(ledger.data.proofs.proof.approvalHistory.length, 1);
+  ledger.unverify('proof', leader, settings, true);
+  assert.equal(ledger.data.proofs.proof.approvalHistory.length, 1);
+  ledger.approve('proof', leader, settings, 'attachment', false, 'reaction');
+  assert.equal(ledger.total('discord-user'), 2000);
+});
+
+test('private review buttons identify the displayed proof version and switch to undo after approval', () => {
+  const { ledger, proof } = fixture();
+  const firstToken = proofReviewToken(proof);
+  const button = proofView(proof).components[0].toJSON().components[0];
+  assert.equal(button.custom_id, `donation-review:approve:proof:${firstToken}`);
+  assert.match(proofView(proof).embeds[0].toJSON().description, /2,000 Gems/);
+  ledger.approve('proof', leader, settings, 'attachment');
+  const approved = ledger.data.proofs.proof;
+  assert.notEqual(proofReviewToken(approved), firstToken);
+  assert.match(proofView(approved).components[0].toJSON().components[0].custom_id, /donation-review:undo:/);
+  ledger.unverify('proof', leader, settings);
+  const token = proofReviewToken(ledger.data.proofs.proof);
+  ledger.data.proofs.proof.rows[0].amount = 3000;
+  assert.notEqual(proofReviewToken(ledger.data.proofs.proof), token);
 });

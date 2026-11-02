@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { validDay } from './tracking.js';
 import { breakForDay } from './break-state.js';
 import { getSettings, defaultSettings, requestRoleIds, isFormerMember, isClanLeader } from './configuration.js';
+import { coverageOnDay } from './donation-coverage.js';
 
 export const PATIENT_ROLE_ID = '1532826238572298451';
 export const TIMEOFF_ROLE_IDS = [
@@ -46,8 +47,11 @@ export function classify(members, submissions, state, day) {
   const pause = breakForDay(state, day);
   const excused = roster.filter(m => pause || isExcused(state, m.id, day));
   const required = roster.filter(m => !pause && !isExcused(state, m.id, day));
-  return { roster, excused, pause, submitted: required.filter(m => submissions.has(m.id)),
-    missing: required.filter(m => !submissions.has(m.id)) };
+  const useCoverage = state.donationCoverage && day >= state.donationCoverage.startDay;
+  const coverage = useCoverage ? coverageOnDay(state, day) : new Map();
+  const paid = member => useCoverage ? coverage.get(member.id)?.covered : submissions.has(member.id);
+  return { roster, excused, pause, coverage, useCoverage, submitted: required.filter(paid),
+    missing: required.filter(m => !paid(m)) };
 }
 
 export class Store {

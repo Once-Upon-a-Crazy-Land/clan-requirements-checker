@@ -1,5 +1,5 @@
 import { Client, GatewayIntentBits, Events, MessageFlags, Partials, escapeMarkdown } from 'discord.js';
-import { DonationLedger, CHECK_EMOJI_ID, attachmentSignature, canVerifyDonation, scanProof, proofView, visionEnabled } from './donations.js';
+import { DonationLedger, CHECK_EMOJI_ID, attachmentSignature, canVerifyDonation, scanProof, proofView, visionEnabled, proofReviewToken } from './donations.js';
 import { fileURLToPath } from 'node:url';
 import { dayAt, validDay, hasImage, latestScreenshot } from './tracking.js';
 import { canRequestTimeoff, Store, dateRange } from './state.js';
@@ -12,13 +12,15 @@ import { brandedMessage } from './messages.js';
 import { formatTimeoffDate, parseTimeoffDate } from './timeoff-date.js';
 import { VACATION_BUTTON, VACATION_MODAL, vacationModal, ensureVacationNotice } from './vacation-panel.js';
 
-import { getSettings, validateSettings, saveSettings, isFormerMember, isClanLeader } from './configuration.js';
-import { SetupSessions, setupView } from './setup.js';
+import { getSettings, validateSettings, saveSettings, isFormerMember, isClanLeader, hasStaffRole } from './configuration.js';
+import { SetupSessions, setupView, dailyGemsModal } from './setup.js';
+import { initializeCoverage, coverageOnDay } from './donation-coverage.js';
 import { DonationBreakManager } from './donation-breaks.js';
 import { assignMemberRoles, reconcileMembershipRoles } from './member-roles.js';
 import { updatePatientPresence } from './presence.js';
 import { breakModal, breaksView, BREAK_MODAL } from './break-panel.js';
 import { MonthlyLeaderboard } from './donation-leaderboard.js';
+import { prepareStateStorage } from './storage.js';
 
 const { DISCORD_TOKEN, GUILD_ID } = process.env;
 const timezone = process.env.TIMEZONE || 'Europe/Paris';
@@ -220,6 +222,10 @@ async function handleSetup(interaction) {
     setupSessions.close(session);
     return interaction.editReply({ ...brandedMessage('Crazyland clan setup.', 'Setup cancelled. Your saved settings are unchanged.'), components: [], attachments: [] });
   }
+  if (operation === 'amount-submit') {
+    setupSessions.setDailyGems(session, interaction.fields.getTextInputValue('gems').trim());
+    return interaction.editReply(setupView(session, 'Daily amount updated in your draft. Press **Save setup** to apply it.'));
+  }
   if (operation === 'field') setupSessions.selectField(session, interaction.values?.[0]);
   else if (operation === 'value') setupSessions.selectValues(session, interaction.values);
   else if (operation === 'save') {
@@ -239,8 +245,11 @@ async function handleSetup(interaction) {
 client.once(Events.ClientReady, async () => {
   try {
     configuredGuild = await client.guilds.fetch(GUILD_ID);
-    store = new Store(fileURLToPath(new URL('./data/state.json', import.meta.url)), today(), GUILD_ID, timezone);
+    const statePath = prepareStateStorage(process.env, fileURLToPath(new URL('./data/', import.meta.url)));
+    store = new Store(statePath, today(), GUILD_ID, timezone);
     donationLedger = new DonationLedger(store);
+    initializeCoverage(store);
+    console.log(`State storage: ${statePath}; ${Object.keys(donationLedger.data.links).length} game-name links, ${Object.values(donationLedger.data.proofs).filter(proof => proof.status === 'approved').length} approved proofs loaded.`);
     monthlyLeaderboard = new MonthlyLeaderboard({ guild: configuredGuild, store, timezone, botId: client.user.id });
     breakManager = new DonationBreakManager({ guild: configuredGuild, store, botId: client.user.id, timezone });
     // Keep Setup available even if a configured channel or role was deleted.
@@ -271,6 +280,7 @@ client.on(Events.GuildMemberUpdate, async (previous, member) => {
   catch (error) { console.error('Membership roles for ' + member.id + ':', error.message); schedule(); return; }
   if (member.guild.id === GUILD_ID && (isFormerMember(previous, config) !== isFormerMember(member, config)
       || isClanLeader(previous, config) !== isClanLeader(member, config)
+      || hasStaffRole(previous, config) !== hasStaffRole(member, config)
       || previous.roles.cache.has(config.memberRoleId) !== member.roles.cache.has(config.memberRoleId))) schedule();
 });
 
@@ -304,7 +314,10 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
     await serialize(async () => {
       const currentMember = await configuredGuild.members.fetch({ user: user.id, force: true });
       const currentMessage = await message.channel.messages.fetch({ message: message.id, force: true });
-      const proof = donationLedger.approve(message.id, currentMember, settings(), attachmentSignature(currentMessage));
+      const currentReaction = currentMessage.reactions.cache.get(CHECK_EMOJI_ID);
+      if (!currentReaction || !(await currentReaction.users.fetch({ limit: 100 })).has(user.id)) return;
+      const proof = donationLedger.approve(message.id, currentMember, settings(), attachmentSignature(currentMessage), false, 'reaction');
+      schedule();
       await removePublicProofNotice(currentMessage.channel, proof);
     });
   } catch (error) {
@@ -312,19 +325,55 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
   }
 });
 
+client.on(Events.MessageReactionRemove, async (reaction, user) => {
+  if (!donationLedger || user.bot || reaction.emoji.id !== CHECK_EMOJI_ID
+      || reaction.message.guildId !== GUILD_ID || reaction.message.channelId !== settings().donationChannelId) return;
+  try {
+    await serialize(async () => {
+      const member = await configuredGuild.members.fetch({ user: user.id, force: true });
+      if (!canVerifyDonation(member, settings())) return;
+      donationLedger.unverify(reaction.message.id, member, settings(), true);
+      schedule();
+    });
+  } catch (error) { console.error('Donation approval removal:', error.message); }
+});
+
 client.on(Events.InteractionCreate, async interaction => {
   const isBreakSubmit = interaction.isModalSubmit() && interaction.customId === BREAK_MODAL;
   const isBreakButton = interaction.isButton() && interaction.customId.startsWith('breaks:');
-  const isSetup = interaction.isMessageComponent() && interaction.customId.startsWith('setup:');
+  const isSetup = (interaction.isMessageComponent() || interaction.isModalSubmit()) && interaction.customId.startsWith('setup:');
+  const isDonationReview = interaction.isButton() && interaction.customId.startsWith('donation-review:');
   const isCommand = interaction.isChatInputCommand() && commands.some(c => c.name === interaction.commandName);
   const isButton = interaction.isButton() && (interaction.customId === VACATION_BUTTON || ['admin:', 'timeoff-page:', 'report-page:', 'timeoff-review:'].some(prefix => interaction.customId.startsWith(prefix)));
   const isVacationSubmit = interaction.isModalSubmit() && [VACATION_MODAL, CLAN_TIMEOFF_MODAL].includes(interaction.customId);
   const isModal = interaction.isModalSubmit() && interaction.customId.startsWith('admin-submit:');
-  if (!isCommand && !isButton && !isModal && !isVacationSubmit && !isSetup && !isBreakButton && !isBreakSubmit) return;
+  if (!isCommand && !isButton && !isModal && !isVacationSubmit && !isSetup && !isBreakButton && !isBreakSubmit && !isDonationReview) return;
   try {
     if (!store || interaction.guildId !== GUILD_ID) throw new Error('Bot is starting or this is not the configured server.');
     checkAccess(interaction, GUILD_ID, settings());
     const action = commandAction(interaction);
+    if (isDonationReview) {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      if (interaction.message.author.id !== client.user.id) throw new Error('Use the bot donation review buttons.');
+      const [, operation, id, token] = interaction.customId.split(':');
+      if (!['approve', 'undo'].includes(operation)) throw new Error('Unknown donation review action.');
+      const saved = donationLedger.data.proofs[id];
+      if (!saved) throw new Error('Proof not found.');
+      const channel = await configuredGuild.channels.fetch(saved.channelId);
+      const message = await channel.messages.fetch({ message: id, force: true });
+      if (message.author.bot || message.webhookId || !hasImage(message)) throw new Error('The original screenshot is no longer available.');
+      await serialize(async () => {
+        if (token !== proofReviewToken(donationLedger.data.proofs[id])) throw new Error('This preview has changed. Use Scan proof again to review the latest name and amount.');
+        const member = await configuredGuild.members.fetch({ user: interaction.user.id, force: true });
+        const currentMessage = await channel.messages.fetch({ message: id, force: true });
+        const proof = operation === 'approve'
+          ? donationLedger.approve(id, member, settings(), attachmentSignature(currentMessage))
+          : donationLedger.unverify(id, member, settings());
+        schedule();
+        await interaction.editReply(proofView(proof));
+      });
+      return;
+    }
     if (isCommand && action?.startsWith('donation-') && action !== 'donation-admin') {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       if (action === 'donation-link') {
@@ -336,7 +385,10 @@ client.on(Events.InteractionCreate, async interaction => {
         await interaction.editReply(brandedMessage('Crazyland clan name linked.', `<@${user.id}> is linked to **${escapeMarkdown(name)}**. Existing credited donations stay with their original Discord member.`));
       } else if (action === 'donation-total') {
         const user = interaction.options.getUser('member') || interaction.user;
-        await interaction.editReply(brandedMessage('Crazyland clan donation total.', `<@${user.id}>: **${donationLedger.total(user.id).toLocaleString('en-US')} Gems** verified.`));
+        const credit = coverageOnDay(store.data, today()).get(user.id);
+        await interaction.editReply(brandedMessage('Crazyland clan donation total.', `<@${user.id}>: **${donationLedger.total(user.id).toLocaleString('en-US')} Gems** verified.\n\n`
+          + `Today covered by donations: **${credit?.covered ? 'Yes' : 'No'}**\nPrepaid days remaining after today: **${credit?.remainingDays || 0}**\n`
+          + `Leftover Gems toward another day: **${(credit?.remainderGems || 0).toLocaleString('en-US')}**\nDaily requirement for new approvals: **${settings().dailyDonationGems.toLocaleString('en-US')} Gems**.`));
       } else {
         const id = interaction.options.getString('proof-id');
         if (!/^\d{17,20}$/.test(id || '')) throw new Error('Enter the original screenshot message ID in proof-id.');
@@ -353,11 +405,13 @@ client.on(Events.InteractionCreate, async interaction => {
           const current = await channel.messages.fetch({ message: id, force: true });
           const proof = await serialize(() => donationLedger.approve(id, member, settings(), attachmentSignature(current),
             interaction.options.getBoolean('repeat-confirmed') === true));
+          schedule();
           await removePublicProofNotice(current.channel, proof);
           await interaction.editReply(proofView(proof));
         } else {
           const member = await configuredGuild.members.fetch({ user: interaction.user.id, force: true });
           const proof = await serialize(() => donationLedger.void(id, member, settings()));
+          schedule();
           await removePublicProofNotice(message.channel, proof);
           const verified = message.reactions.cache.find(r => r.emoji.name === '✅');
           if (verified?.me) await verified.users.remove(client.user.id);
@@ -393,7 +447,13 @@ client.on(Events.InteractionCreate, async interaction => {
       return;
     }
     if (isSetup) {
-      await interaction.deferUpdate();
+      if (interaction.isButton() && interaction.customId.endsWith(':amount')) {
+        const session = setupSessions.get(interaction.customId.split(':')[1], interaction.user.id, interaction.guildId);
+        await interaction.showModal(dailyGemsModal(session));
+        return;
+      }
+      if (interaction.isModalSubmit()) await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      else await interaction.deferUpdate();
       await serialize(() => handleSetup(interaction));
       return;
     }
