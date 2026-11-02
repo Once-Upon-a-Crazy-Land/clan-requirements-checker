@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DonationLedger, canVerifyDonation, scanProof, scanImage, validateScan } from './donations.js';
+import { DonationLedger, canVerifyDonation, scanProof, scanImage, validateScan, visionConfiguration, visionEnabled } from './donations.js';
 const settings = { leaderRoleIds: ['leader', 'coleader'] };
 const member = role => ({ id: 'officer', user: { bot: false }, roles: { cache: new Map([[role, {}]]) } });
 const leader = member('leader');
@@ -108,4 +108,45 @@ test('authentication diagnostics never expose provider messages or credentials',
     assert.equal(options.headers.Authorization, 'Bearer test-key');
     return new Response('', { status: 401 });
   } }), /401/);
+});
+
+test('Gemini configuration selects Google credentials independently of OpenAI', () => {
+  assert.equal(visionConfiguration({ GEMINI_API_KEY: 'google', OPENAI_API_KEY: 'openai' }).provider, 'gemini');
+  assert.equal(visionConfiguration({ AI_PROVIDER: 'openai', GEMINI_API_KEY: 'google', OPENAI_API_KEY: 'openai' }).apiKey, 'openai');
+  assert.equal(visionConfiguration({ AI_PROVIDER: 'gemini' }).model, 'gemini-3.5-flash-lite');
+  assert.equal(visionEnabled({ GEMINI_API_KEY: 'google' }), true);
+  assert.equal(visionEnabled({ AI_PROVIDER: 'gemini', OPENAI_API_KEY: 'wrong-provider' }), false);
+  assert.throws(() => visionConfiguration({ AI_PROVIDER: 'unknown' }), /AI_PROVIDER/);
+});
+
+test('Gemini sends inline image and shared schema to Google and validates donation output', async () => {
+  const scan = await scanImage('data:image/png;base64,aA==', { provider: 'gemini', apiKey: ' test-google-key ', fetcher: async (url, options) => {
+    assert.equal(url, 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent');
+    assert.equal(options.headers['x-goog-api-key'], 'test-google-key');
+    assert.equal(options.headers.Authorization, undefined);
+    assert.ok(!url.includes('test-google-key'));
+    const body = JSON.parse(options.body);
+    assert.deepEqual(body.contents[0].parts[0].inlineData, { mimeType: 'image/png', data: 'aA==' });
+    assert.equal(body.generationConfig.responseFormat.text.mimeType, 'APPLICATION_JSON');
+    assert.deepEqual(body.generationConfig.responseFormat.text.schema.required, ['rows', 'unclear']);
+    return Response.json({ candidates: [{ finishReason: 'STOP', content: { parts: [{ thought: true, text: 'ignore thoughts' }, { text: JSON.stringify({ unclear: false,
+      rows: [{ name: 'Sterio', amount: 10000, time: '12:51' }] }) }] } }] });
+  } });
+  assert.equal(scan.rows[0].amount, 10000);
+});
+
+test('Gemini quota, blocked, unfinished and malformed responses fail without exposing secrets', async () => {
+  const options = { provider: 'gemini', apiKey: 'google-test' };
+  await assert.rejects(scanImage('data:image/png;base64,aA==', { ...options,
+    fetcher: async () => Response.json({ error: { message: 'secret-key-fragment' } }, { status: 429 }),
+  }), error => /quota or rate limit/.test(error.message) && !error.message.includes('secret-key-fragment'));
+  for (const response of [
+    { promptFeedback: { blockReason: 'SAFETY' } },
+    { candidates: [{ finishReason: 'MAX_TOKENS', content: { parts: [{ text: '{}' }] } }] },
+    { candidates: [{ finishReason: 'STOP', content: { parts: [{ text: 'not json' }] } }] },
+    { candidates: [{ finishReason: 'STOP', content: { parts: [{ text: '{"rows":[],"unclear":"wrong"}' }] } }] },
+  ]) {
+    await assert.rejects(scanImage('data:image/png;base64,aA==', { ...options, fetcher: async () => Response.json(response) }), /No donation was credited/);
+  }
+  await assert.rejects(scanImage('x', { provider: 'openai', apiKey: 'AIza-test', fetcher: () => { throw new Error('Must not call OpenAI'); } }), /GEMINI_API_KEY/);
 });

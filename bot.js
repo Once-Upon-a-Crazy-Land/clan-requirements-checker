@@ -1,5 +1,5 @@
 import { Client, GatewayIntentBits, Events, MessageFlags, Partials, escapeMarkdown } from 'discord.js';
-import { DonationLedger, CHECK_EMOJI_ID, attachmentSignature, canVerifyDonation, scanProof, proofView } from './donations.js';
+import { DonationLedger, CHECK_EMOJI_ID, attachmentSignature, canVerifyDonation, scanProof, proofView, visionEnabled } from './donations.js';
 import { fileURLToPath } from 'node:url';
 import { dayAt, validDay, hasImage, latestScreenshot } from './tracking.js';
 import { canRequestTimeoff, Store, dateRange } from './state.js';
@@ -260,7 +260,7 @@ client.on(Events.MessageCreate, async message => {
         || canVerifyDonation(author, settings()))) return;
     schedule();
     await message.react(CHECK_EMOJI_ID);
-    if (process.env.OPENAI_API_KEY) {
+    if (visionEnabled()) {
       void enqueueScan(message).catch(async error => {
         console.error('Donation scan:', error.message);
         try { await message.reply({ ...brandedMessage('Crazyland clan donation scan.', 'Scan failed. No donation was credited. A leader can use /donation action:Scan proof to retry.'), allowedMentions: { parse: [], repliedUser: false } }); }
