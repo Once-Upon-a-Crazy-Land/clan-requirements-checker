@@ -1,9 +1,33 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { panel, adminTimeoffView } from './panel.js';
-import { timeoffView, timeoffBlocks, paginateBlocks, donationView, listMessage, timeoffRequestNotice } from './views.js';
+import { DonationLedger } from './donations.js';
+import { timeoffView, timeoffBlocks, paginateBlocks, donationView, listMessage, timeoffRequestNotice, memberView } from './views.js';
 
 const state = () => ({ data: { requests: {}, grants: {} } });
+
+test('/me shows only the caller’s donation and time-off records', () => {
+  const store = state();
+  const day = '2026-09-14';
+  const ledger = new DonationLedger(store);
+  store.data.donationCoverage = { startDay: day };
+  ledger.data.links = { caller: 'Caller name', other: 'Other name' };
+  ledger.data.proofs.proof = { status: 'approved', coverage: { startDay: day, dailyGems: 1000 },
+    credits: [{ userId: 'caller', amount: 2500 }, { userId: 'other', amount: 9000 }] };
+  store.data.requests = { mine: { userId: 'caller', status: 'pending' }, theirs: { userId: 'other', status: 'pending' } };
+  store.data.grants = { theirs: { userId: 'other', start: day, end: day } };
+
+  const message = memberView(store.data, ledger, day, 'caller', 1000);
+  const embed = message.embeds[0].toJSON();
+  assert.match(embed.description, /Caller name/);
+  assert.doesNotMatch(embed.description, /Other name/);
+  assert.match(embed.fields[0].value, /2,500 Gems/);
+  assert.match(embed.fields[0].value, /Prepaid days remaining after today: \*\*1\*\*/);
+  assert.match(embed.fields[0].value, /Leftover Gems toward another day: \*\*500\*\*/);
+  assert.match(embed.fields[1].value, /No active or upcoming approved time off/);
+  assert.match(embed.fields[1].value, /Pending requests: \*\*1\*\*/);
+  assert.deepEqual(message.allowedMentions, { parse: [] });
+});
 const automation = () => ({ nicknameErrors: [], lastError: null, lastCheck: null });
 const noTextCards = message => {
   assert.ok(message.files.every(file => !file.name?.endsWith('.txt')));

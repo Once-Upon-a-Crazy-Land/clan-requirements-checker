@@ -95,6 +95,7 @@ On startup the bot posts the branded member vacations notice in channel `1549128
 
 | Command | Who can use it | Purpose |
 | --- | --- | --- |
+| `/me` | Members | Privately view their linked game name, verified Gems, prepaid days, leftover Gems and time-off status |
 | `/clan action:Donation report` | Manage Server | Today's submitted, missing and excused members, with proof links |
 | `/clan action:Donation report date:2026-09-14` | Manage Server | Report for a previous date |
 | `/clan action:Request time off` | Members with an allowed time-off role | Open a private form for the start date, number of days and optional reason |

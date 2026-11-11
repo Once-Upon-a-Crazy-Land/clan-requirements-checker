@@ -5,7 +5,7 @@ import { dayAt, validDay, hasImage, latestScreenshot } from './tracking.js';
 import { canRequestTimeoff, Store, dateRange } from './state.js';
 import { Automation } from './automation.js';
 import { commands, panel, adminTimeoffView, modal } from './panel.js';
-import { timeoffView, donationView, timeoffRequestNotice } from './views.js';
+import { timeoffView, donationView, timeoffRequestNotice, donationSummary, memberView } from './views.js';
 import { checkAccess } from './access.js';
 import { commandAction, registerCommands, CLAN_TIMEOFF_MODAL } from './command-menu.js';
 import { brandedMessage } from './messages.js';
@@ -14,7 +14,7 @@ import { VACATION_BUTTON, VACATION_MODAL, vacationModal, ensureVacationNotice } 
 
 import { getSettings, validateSettings, saveSettings, isFormerMember, isClanLeader, hasStaffRole } from './configuration.js';
 import { SetupSessions, setupView, dailyGemsModal } from './setup.js';
-import { initializeCoverage, coverageOnDay } from './donation-coverage.js';
+import { initializeCoverage } from './donation-coverage.js';
 import { DonationBreakManager } from './donation-breaks.js';
 import { assignMemberRoles, reconcileMembershipRoles } from './member-roles.js';
 import { updatePatientPresence } from './presence.js';
@@ -355,6 +355,11 @@ client.on(Events.InteractionCreate, async interaction => {
     if (!store || interaction.guildId !== GUILD_ID) throw new Error('Bot is starting or this is not the configured server.');
     checkAccess(interaction, GUILD_ID, settings());
     const action = commandAction(interaction);
+    if (isCommand && action === 'me') {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      await interaction.editReply(memberView(store.data, donationLedger, today(), interaction.user.id, settings().dailyDonationGems));
+      return;
+    }
     if (isDonationReview) {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       if (interaction.message.author.id !== client.user.id) throw new Error('Use the bot donation review buttons.');
@@ -388,10 +393,8 @@ client.on(Events.InteractionCreate, async interaction => {
         await interaction.editReply(brandedMessage('Crazyland clan name linked.', `<@${user.id}> is linked to **${escapeMarkdown(name)}**. Existing credited donations stay with their original Discord member.`));
       } else if (action === 'donation-total') {
         const user = interaction.options.getUser('member') || interaction.user;
-        const credit = coverageOnDay(store.data, today()).get(user.id);
-        await interaction.editReply(brandedMessage('Crazyland clan donation total.', `<@${user.id}>: **${donationLedger.total(user.id).toLocaleString('en-US')} Gems** verified.\n\n`
-          + `Today covered by donations: **${credit?.covered ? 'Yes' : 'No'}**\nPrepaid days remaining after today: **${credit?.remainingDays || 0}**\n`
-          + `Leftover Gems toward another day: **${(credit?.remainderGems || 0).toLocaleString('en-US')}**\nDaily requirement for new approvals: **${settings().dailyDonationGems.toLocaleString('en-US')} Gems**.`));
+        await interaction.editReply(brandedMessage('Crazyland clan donation total.', `<@${user.id}>\n\n`
+          + donationSummary(store.data, donationLedger, today(), user.id, settings().dailyDonationGems)));
       } else {
         const id = interaction.options.getString('proof-id');
         if (!/^\d{17,20}$/.test(id || '')) throw new Error('Enter the original screenshot message ID in proof-id.');

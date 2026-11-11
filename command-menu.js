@@ -29,7 +29,8 @@ export const commands = [new SlashCommandBuilder()
   .addUserOption(o => o.setName('member').setDescription('Member to link or view; totals default to yourself'))
   .addStringOption(o => o.setName('game-name').setDescription('Exact in-game name to link').setMaxLength(80))
   .addStringOption(o => o.setName('proof-id').setDescription('Original screenshot message ID to scan, verify or void'))
-  .addBooleanOption(o => o.setName('repeat-confirmed').setDescription('Verify proof only: I checked that a matching line is a separate donation'))];
+  .addBooleanOption(o => o.setName('repeat-confirmed').setDescription('Verify proof only: I checked that a matching line is a separate donation')),
+  new SlashCommandBuilder().setName('me').setDescription('Privately view your clan donation and time-off information')];
 
 export function commandAction(interaction) {
   if (!['clan', 'donation'].includes(interaction.commandName)) return interaction.commandName;

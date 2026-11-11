@@ -9,8 +9,13 @@ const interaction = action => ({ guildId: 'server', commandName: ['donation-link
   getString: (name, required) => { assert.equal(name, 'action'); assert.equal(required, true); return action; },
 } });
 
-test('clan and donation commands expose separate actions and relevant options', () => {
-  assert.equal(commands.length, 2);
+test('clan and donation commands expose separate actions and /me takes no options', () => {
+  assert.equal(commands.length, 3);
+  const me = commands[2].toJSON();
+  assert.equal(me.name, 'me');
+  assert.deepEqual(me.options, []);
+  assert.equal(me.default_member_permissions, undefined);
+  assert.doesNotThrow(() => checkAccess({ guildId: 'server', commandName: 'me' }, 'server'));
   const command = commands[0].toJSON();
   assert.equal(command.name, 'clan');
   assert.equal(command.default_member_permissions, undefined);
@@ -64,7 +69,7 @@ test('registration replaces legacy commands only after the new command succeeds'
     delete: async id => events.push(['delete', id]),
   } };
   await registerCommands(guild);
-  assert.deepEqual(events, [['create', 'clan'], ['create', 'donation'], ['delete', 'donations'], ['delete', 'timeoff'], ['delete', 'timeoff-status'], ['delete', 'donation-admin']]);
+  assert.deepEqual(events, [['create', 'clan'], ['create', 'donation'], ['create', 'me'], ['delete', 'donations'], ['delete', 'timeoff'], ['delete', 'timeoff-status'], ['delete', 'donation-admin']]);
   events.length = 0;
   guild.commands.create = async () => { throw new Error('Registration unavailable'); };
   await assert.rejects(registerCommands(guild), /Registration unavailable/);

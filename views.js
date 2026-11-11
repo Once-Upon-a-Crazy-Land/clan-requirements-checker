@@ -1,8 +1,35 @@
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle, escapeMarkdown } from 'discord.js';
 import { brandedMessage } from './messages.js';
 import { formatTimeoffDate } from './timeoff-date.js';
+import { coverageOnDay } from './donation-coverage.js';
 
 const safe = value => escapeMarkdown(String(value).replace(/[\r\n\t]/g, ' '));
+
+export function donationSummary(state, ledger, day, userId, dailyGems) {
+  const credit = coverageOnDay(state, day).get(userId);
+  return `Verified donations: **${ledger.total(userId).toLocaleString('en-US')} Gems**\n`
+    + `Today covered by donations: **${credit?.covered ? 'Yes' : 'No'}**\n`
+    + `Prepaid days remaining after today: **${credit?.remainingDays ?? 0}**\n`
+    + `Leftover Gems toward another day: **${(credit?.remainderGems ?? 0).toLocaleString('en-US')}**\n`
+    + `Daily requirement for new approvals: **${dailyGems.toLocaleString('en-US')} Gems**`;
+}
+
+export function memberView(state, ledger, day, userId, dailyGems) {
+  const name = ledger.data.links[userId];
+  const pending = Object.values(state.requests).filter(request => request.userId === userId && request.status === 'pending').length;
+  const approved = Object.values(state.grants)
+    .filter(grant => grant.userId === userId && !grant.revokedAt && grant.end >= day)
+    .sort((a, b) => a.start.localeCompare(b.start))[0];
+  const timeoff = approved
+    ? `${approved.start <= day ? 'Active' : 'Next approved'}: **${formatTimeoffDate(approved.start)} – ${formatTimeoffDate(approved.end)}**`
+    : 'No active or upcoming approved time off.';
+  return brandedMessage('Your Crazyland clan info', `<@${userId}>\nLinked game name: **${name ? safe(name) : 'None'}**`, {
+    fields: [
+      { name: 'Donations', value: donationSummary(state, ledger, day, userId, dailyGems) },
+      { name: 'Time off', value: `${timeoff}\nPending requests: **${pending}**` },
+    ],
+  });
+}
 
 export function paginateBlocks(blocks, limit = 2800) {
   const pages = [];
